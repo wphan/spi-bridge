@@ -142,7 +142,7 @@ err_opened:
 
 /* function to read from socket prints message out as (chars) */
 static void read_socket(void) {
-	size_t recv_len, to_write, wrote_len;
+	size_t recv_len, sent_len;
 	uint8_t udp_buffer[SPI_MAX_PACKET_LEN];
 	uint8_t write_buffer[SPI_MAX_PACKET_LEN];
 	int i = 0;
@@ -153,16 +153,19 @@ static void read_socket(void) {
 		for (i = 0; i < recv_len; i++)
 			printf("%c", udp_buffer[i]);
 		printf("\n");
+		
 		//ok, received from UDP, send over SPI now
-
+		sent_len = write(spifd, udp_buffer, recv_len); 
+		if (sent_len != recv_len)
+			fprintf(stderr, "Error writing to SPI bus.  Expected to send: %u bytes, but sent: %u bytes\n", (unsigned int)recv_len, (unsigned int) sent_len);
 	}
 }
 
 /* function to read from SPI */
-// THIS FUNCITON USES READ(), only supports half duplex full duplex requires ioctl()
+// THIS FUNCITON USES READ(), only supports half duplex, full duplex requires ioctl()
 static void spi_read(int fd, int len) {
 	unsigned char buffer[32], *bp;
-	int ret;
+	int ret, sent_len;
 
 	//create limits on read length, 2<len<32
 	if (len < 2)
@@ -189,6 +192,9 @@ static void spi_read(int fd, int len) {
 	printf("\n");
 
 	//send through UDP now
+	sent_len = sendto(sockfd, buffer, len, 0, (struct sockaddr*) &remote_addr, sizeof(remote_addr));
+	if (sent_len != len) 
+		fprintf(stderr, "Error sending to socket. Expected to send: %u bytes, but sent: %u bytes\n", (unsigned int)len, (unsigned int) sent_len);
 }
 
 /*
