@@ -12,13 +12,15 @@
 #include <poll.h>
 #include <fcntl.h>
 
-#include <linux/spi/spidev.h>
-#include <linux/types.h>
-#include <sys/ioctl.h>
-
 #include <stdbool.h>
 
+#include <sys/ioctl.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+
 #include <netinet/in.h>
+#include <linux/spi/spidev.h>
+#include <linux/types.h>
 
 #define PORT (18420)
 #define TIMEOUT (1000) //poll timeout in ms
@@ -28,12 +30,6 @@
 static int sockfd; //socket file descriptor
 static int spifd; //spi file descriptor
 static struct sockaddr_in remote_addr, my_addr;
-//SPI variables
-static unsigned char spi_mode = SPI_MODE_0;
-static unsigned char spi_bitsPerWord = 8;
-static unsigned int spi_speed = 1000000;
-static uint8_t *spi_tx;
-static uint8_t *spi_rx;
 
 //you should protect this with a mutex
 static volatile bool should_quit = false;
@@ -41,6 +37,48 @@ static volatile bool should_quit = false;
 static void quit_handler(int signum) {
 	printf("Received signal %d\n", signum);
 	should_quit = true;
+}
+
+static int setup_spi(char *target_spi) {
+	__u8 mode = SPI_MODE_0, 
+	     lsb = 0, 
+	     bits=8;
+	__u32 speed = 500000;
+
+	if ((spifd = open(target_spi, O_RDWR)) < 0) {
+		perror("Failed to open SPI bus");
+		close(spifd);
+		return -1;
+	}
+
+	if (ioctl(spifd, SPI_IOC_WR_MODE32, &mode) < 0) {
+		perror("SPI can't write spi mode");
+		close(spifd);
+		return -1;
+	}
+	if (ioctl(spifd, SPI_IOC_WR_LSB_FIRST, &lsb) < 0) {
+		perror("SPI cant write_LSB_first");
+		close(spifd);
+		return -1;
+	}
+	if (ioctl(spifd, SPI_IOC_WR_BITS_PER_WORD, &bits) < 0) {
+		perror("SPI cant write bits/word");
+		close(spifd);
+		return -1;
+	}
+	if (ioctl(spifd, SPI_IOC_WR_MAX_SPEED_HZ, &speed) < 0) {
+		perror("SPI speed");
+		close(spifd);
+		return -1;
+	}
+
+	printf("SPI bus on:     %s\n", target_spi);
+	printf("mode:           %d\n", mode);
+	printf("lsb?:		%d\n", lsb);
+	printf("bits per word:  %d\n", bits);
+	printf("Hz max:		%d\n", speed);
+
+	return 0;
 }
 
 static int setup_udp(char *target_ip, int broadcast) {
@@ -120,29 +158,47 @@ static void read_socket(void) {
 	}
 }
 
-/* function to read from SPI bus, prrints message out as (chars) */
-static void read_spi(void) {
+/* function to read from SPI */
+// THIS FUNCITON USES READ(), only supports half duplex full duplex requires ioctl()
+static void spi_read(int fd, int len) {
+	unsigned char buffer[32], *bp;
+	int ret;
 
+	//create limits on read length, 2<len<32
+	if (len < 2)
+		len = 2;
+	else if (len > sizeof(buffer))
+		len = sizeof(buffer);
+	memset(buffer, 0, sizeof(buffer));
+
+	ret = read(fd, buffer, len);
+	if (ret < 0) {
+		perror("read");
+		return;
+	}
+	else if (ret != len) {
+		fprintf(stderr, "short read\n");
+		return;
+	}
+
+	printf("length: %2d, status: %2d, returned: %02x %02x,", len, ret, buffer[0], buffer[1]);
+	ret -= 2;
+	bp = buffer + 2;
+	while (ret-- > 0)
+		printf(" %02x", *bp++);
+	printf("\n");
+
+	//send through UDP now
 }
 
 /*
- * Thread Function: wait for data from SPI bus and forward through UDP
+ * Thread Function: wait for data from SPI bus
  */ 
 static void *spi_wait(__attribute__((unused))void *unused) {
 	sigset_t sigset;
 	int ret;
+	char *buffer;
 	struct pollfd fd;
-	struct spi_ioc_transfer tr = {
-		.tx_buf = (unsigned long)spi_tx,
-		.rx_buf = (unsigned long)spi_rx,
-		.len = SPI_MAX_PACKET_LEN,
-		.delay_usecs = 1,
-		.speed_hz = spi_speed,
-		.bits_per_word = spi_bitsPerWord,
-	};
-
-	spi_tx = malloc(SPI_MAX_PACKET_LEN);
-	spi_rx = malloc(SPI_MAX_PACKET_LEN);
 
 	/* ignore signals in this thread, they're handled by the parent */
 	sigemptyset(&sigset);
@@ -152,28 +208,18 @@ static void *spi_wait(__attribute__((unused))void *unused) {
 		pthread_exit(NULL);
 	}
 
-	//see if theres stufff
-	ret = ioctl(spifd, SPI_IOC_MESSAGE(1), &tr)
-	if (ret<1)
-		perror("bleh broken");
 	/* wait for incoming data or quit */
-/*	
-	fd.fd = spifd;
-	fd.events = POLLIN;
-	while (!should_quit) {
-		ret = poll(&fd, 1, TIMEOUT);
-		if (ret > 0)
-			read_spi();
-		else
-			fprintf(stderr, "Error reading from SPI device\n");
-		fd.revents = 0;
+	while(!should_quit) {
+		spi_read(spifd, 32);
+		sleep(1);
 	}
-*/
+
+	return NULL;
 }
 
 
 /*
- * Thread Function: wait for data from local UDP socket and forward through SPI
+ * Thread Function: wait for data from local UDP socket
  */
 static void *udp_wait(__attribute__((unused))void *unused) {
 	sigset_t sigset;
@@ -193,7 +239,7 @@ static void *udp_wait(__attribute__((unused))void *unused) {
 	fd.events = POLLIN;
 	while (!should_quit) {
 		ret = poll(&fd, 1, TIMEOUT);
-		printf("ret: %d\n", ret);
+		printf("udp_ret: %d\n", ret);
 		if (ret > 0) 
 			read_socket();
 		else if (ret < 0)
@@ -215,8 +261,6 @@ int main(int argc, char *argv[]) {
 	pthread_t udp_thread;
 	pthread_t spi_thread;
 	pthread_attr_t tattr;
-	//spi specific stuff
-	spi_mode = SPI_MODE_0;
 
 	/* catch ctrl-c to quit program safely */
 	if (signal(SIGINT, quit_handler) == SIG_ERR) {
@@ -260,48 +304,11 @@ int main(int argc, char *argv[]) {
 		close(sockfd);
 	}
 
-	/* setup the SPI device, stuck all this here b/c making a function did bad things, 
-	 * SPI_MODE: 0
-	 * BITS_PER_WORD: 8
-	 * SPEED: 1000000
-	 */ 
-	spifd = open(spi_path, O_RDWR);
-	if (spifd < 0) {
-		perror("could not open spi device");	
+	/* setup the SPI device */
+	if (setup_spi(spi_path) != 0) {
+		perror("Could not open SPI bus, quitting out...");
 		close(spifd);
-		return 0;
 	}
-	if (ioctl(spifd, SPI_IOC_WR_MODE, &spi_mode) < 0) {
-		perror("could not set SPIMode(WR), ioctl failed");
-		close(spifd);
-		return 0;
-	}
-	if (ioctl(spifd, SPI_IOC_RD_MODE, &spi_mode) < 0) {
-		perror("could not set SPIMODE(RD), ioctl failed");
-		close(spifd);
-		return 0;
-	}
-	if (ioctl(spifd, SPI_IOC_WR_BITS_PER_WORD, &spi_bitsPerWord) < 0) {
-		perror("could not set SPI bits per word(WR), ioctl failed");
-		close(spifd);
-		return 0;
-	}
-	if (ioctl(spifd, SPI_IOC_RD_BITS_PER_WORD, &spi_bitsPerWord) < 0) {
-		perror("could not set SPI bits per word(RD), ioctl failed");
-		close(spifd);
-		return 0;
-	}
-	if (ioctl(spifd, SPI_IOC_WR_MAX_SPEED_HZ, &spi_speed) < 0) {
-		perror("could not set SPI speed(wr), ioctl failed");
-		close(spifd);
-		return 0;
-	}
-	if (ioctl(spifd, SPI_IOC_RD_MAX_SPEED_HZ, &spi_speed) < 0) {
-		perror("could not set SPI speed(rd), ioctl failed");
-		close(spifd);
-		return 0;
-	}
-
 
 	/* start UDP and SPI threads, then do nothing until ctrl-c or something dies */
 	if (pthread_attr_init(&tattr)) {

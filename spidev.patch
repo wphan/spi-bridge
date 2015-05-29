@@ -1,0 +1,49 @@
+diff --git a/arch/arm/boot/dts/omap3-overo-base.dtsi b/arch/arm/boot/dts/omap3-overo-base.dtsi
+index f09aa1c..74166e4 100644
+--- a/arch/arm/boot/dts/omap3-overo-base.dtsi
++++ b/arch/arm/boot/dts/omap3-overo-base.dtsi
+@@ -86,7 +86,17 @@
+ 	pinctrl-0 = <
+ 			&hsusb2_pins
+ 	>;
+-
++	
++	mcspi1_pins: pinmux_mcspi1_pins {
++		pinctrl-single,pins = <
++			OMAP3_CORE1_IOPAD(0x21c8, PIN_OUTPUT | MUX_MODE0)	/* mcspi1_clk.mcspi1_clk */
++			OMAP3_CORE1_IOPAD(0x21ca, PIN_OUTPUT | MUX_MODE0)	/* mcspi1_simo.mcspi1_simo */
++			OMAP3_CORE1_IOPAD(0x21cc, PIN_INPUT | MUX_MODE0)	/* mcspi1_somi.mcspi1_somi */
++			OMAP3_CORE1_IOPAD(0x21ce, PIN_OUTPUT_PULLUP | MUX_MODE0) /* mcspi1_cs0.mcspi1_cs0 */
++			OMAP3_CORE1_IOPAD(0x21d0, PIN_OUTPUT_PULLUP | MUX_MODE0) /* mcspi1_cs1.mcspi1_cs1 */		
++		>;
++	};
++	
+ 	uart2_pins: pinmux_uart2_pins {
+ 		pinctrl-single,pins = <
+ 			OMAP3_CORE1_IOPAD(0x216c, PIN_INPUT | MUX_MODE1)	/* mcbsp3_dx.uart2_cts */
+@@ -148,6 +158,25 @@
+ 	};
+ };
+ 
++&mcspi1 {
++	pinctrl-names = "default";
++	pintrl-0 = <&mcspi1_pins>;
++	status = "okay";	
++
++	spi1_0: spi1_0@0 {
++		compatible = "spidev";
++		reg = <0>;
++		spi-max-frequency = <12500000>; 
++		spi-cpha;
++	};
++	spi1_1: spi1_1@1{
++		compatible = "spidev";
++		reg = <1>;
++		spi-max-frequency = <12500000>;
++		spi-cpha;
++	};
++};
++
+ &i2c1 {
+ 	pinctrl-names = "default";
+ 	pinctrl-0 = <&i2c1_pins>;
