@@ -294,7 +294,8 @@ int main(int argc, char *argv[]) {
 	}
 	optind--; //optind is the index of the next element of the argv[] vector to be processed
 	if ((argc - optind) < 3) {
-		printf("spi-bridge [-a] [-b] [-c] <target_ip> <SPI blockdevice>\n");
+		printf("spi-bridge [-b] <target_ip> <SPI blockdevice>\n");
+		printf("[-b] to enable UDP broadcast\n");
 		printf(" e.g. $ mavlink-bridge 127.0.0.1 /dev/spidev1.0\n\n");
 		printf(" wrong number of arguments, quitting.\n");
 		return -1;
