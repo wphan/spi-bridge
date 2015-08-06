@@ -27,7 +27,7 @@ index f09aa1c..74166e4 100644
  
 +&mcspi1 {
 +	pinctrl-names = "default";
-+	pintrl-0 = <&mcspi1_pins>;
++	pinctrl-0 = <&mcspi1_pins>;
 +	status = "okay";	
 +
 +	spi1_0: spi1_0@0 {
