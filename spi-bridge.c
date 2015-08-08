@@ -40,7 +40,7 @@ static void quit_handler(int signum) {
 }
 
 static int setup_spi(char *target_spi) {
-	__u8 mode = SPI_MODE_0, 
+	__u32 mode = SPI_MODE_0, 
 	     lsb = 0, 
 	     bits=8;
 	__u32 speed = 500000;
